@@ -10,23 +10,40 @@ from struct import unpack
 import argparse
 this = sys.modules[__name__]
 
+VERSION = '0.1a'
+RELEASE = 'Development'
+
+if sys.version_info[0] < 3:
+    # Python 3 required for command line execution
+    raise AssertionError("Must use Python 3")
+
 def cli():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--filter', nargs='?', help='filter packets by type',
+    parser.add_argument('--filter', nargs='*', help='filter packets by type',
                         choices=['tcp','udp','icmp'])
-    parser.add_argument('--src_port', type=int, help='specify a source port to monitor')
-    parser.add_argument('--dest_port', type=int, help='specify a destination port to monitor')
+    parser.add_argument('--src-port', nargs='*', help='filter packets by source port')
+    parser.add_argument('--src-ip', nargs='*', help='filter packets by source IP')
+    parser.add_argument('--dest-port', nargs='*', help='filter packets by destination port')
+    parser.add_argument('--dest-ip', nargs='*', help='filter packets by destination IP')
     parser.add_argument('--nocolor', action='store_true', help='Skip colors in output')
+    parser.add_argument('--verbose', action='store_true', help='Enable verbose output')
+    parser.add_argument('--no-data', action='store_true', help='Skip printing raw data')
     return parser.parse_args()
 
 def mac_addr(addr):
     # Takes a list of mac addr components
     return ':'.join(['{:02x}'.format(a) for a in addr])
 
-def cprint(val, col=None):
+def cprint(val, col=None, verbose=False):
+    if not args.verbose and verbose:
+        return
     if col==None:
-        print(val, flush=True)
-    print(color_wrap(val, col), flush=True)
+        msg = val
+    else:
+        msg = color_wrap(val, col)
+    # Skipping print buffering
+    msg += '\n'
+    sys.stdout.write(msg)
 
 def color_wrap(val, col):
     if args.nocolor:
@@ -95,23 +112,29 @@ class Packet:
     IP = 8
     OTH = 0
 
+    # Unpack arg[0] for raw packet conversion
+    U_ETH = '!6s6sH'
+    U_IP = '!BBHHHBBH4s4s'
+    U_TCP = '!HHLLBBHHH'
+    U_UDP = '!HHHH'
+    U_ICMP = '!BBH'
+
     def __init__(self, raw):
         self.protocol = 0
         self.raw = raw
         self.parse_eth()
         self._info_cache = False
+        self.src_port = 0
+        self.dest_port = 0
+        self.src_addr = '0'
+        self.dest_addr = '0'
         if self.ip_packet:
             self.parse_ip()
-            if self.protocol == 1:
-                self.parse_icmp()
-            elif self.protocol == 6:
-                self.parse_tcp()
-            elif self.protocol == 17:
-                self.parse_udp()
+            self.parse_body()
 
     def info(self):
         print('\nETH  :: eprotocol = {} | source MAC = {} | destination MAC = {} |'.format(
-            color_wrap(self.eprot, Color.GREEN),
+            color_wrap(self.eprot, Color.YELLOW),
             color_wrap(self.source_mac, Color.GREEN),
             color_wrap(self.destination_mac, Color.CYAN)))
         if not self.ip_packet:
@@ -119,7 +142,7 @@ class Packet:
             return
         else:
             print('IP   :: version = {} | ttl = {} | protocol = {} | source IP = {} | destination IP = {} |'.format(
-                color_wrap(self.version, Color.BLUE),
+                color_wrap(self.version, Color.YELLOW),
                 color_wrap(self.ttl, Color.YELLOW),
                 color_wrap(self.protocol, Color.YELLOW),
                 color_wrap(self.src_addr, Color.GREEN),
@@ -130,37 +153,40 @@ class Packet:
         else:
             if self.protocol == Packet.ICMP:
                 print('ICMP :: type = {} | code = {} | checksum = {} |'.format(
-                    color_wrap(self.icmp_type, Color.GREEN),
+                    color_wrap(self.icmp_type, Color.YELLOW),
                     color_wrap(self.icmp_code, Color.YELLOW),
                     color_wrap(self.checksum, Color.YELLOW)))
             elif self.protocol == Packet.TCP:
                 print('TCP  :: src_port = {} | dest_port = {} | seq = {} | ack = {} |'.format(
-                    color_wrap(self.source_port, Color.GREEN),
+                    color_wrap(self.src_port, Color.GREEN),
                     color_wrap(self.dest_port, Color.CYAN),
                     color_wrap(self.seq, Color.YELLOW),
                     color_wrap(self.ack, Color.YELLOW)))
             elif self.protocol == Packet.UDP:
                 print('UDP  :: src_port = {} | dest_port = {} | length = {} | checksum = {} |'.format(
-                    color_wrap(self.source_port, Color.GREEN),
+                    color_wrap(self.src_port, Color.GREEN),
                     color_wrap(self.dest_port, Color.CYAN),
                     color_wrap(self.length, Color.YELLOW),
                     color_wrap(self.checksum, Color.YELLOW)))
+
             try:
                 d_msg = self.data.decode('utf-8')[:64]
             except UnicodeDecodeError:
                 d_msg = self.data[:64]
-            print('DATA :: {}'.format(color_wrap(d_msg, Color.BLUE)))
+
+            if not args.no_data:
+                cprint('DATA :: {}'.format(color_wrap(d_msg, Color.BLUE)), None, True)
 
     def parse_eth(self):
         eth_head = self.raw[:self.eth_len]
-        self.eth = unpack('!6s6sH', eth_head)
+        self.eth = unpack(Packet.U_ETH, eth_head)
         self.eprot = socket.ntohs(self.eth[2])
         self.destination_mac = mac_addr(self.raw[:6])
         self.source_mac = mac_addr(self.raw[6:12])
 
     def parse_ip(self):
         ip_head = self.raw[self.eth_len:20+self.eth_len]
-        iph = unpack('!BBHHHBBH4s4s', ip_head)
+        iph = unpack(Packet.U_IP, ip_head)
         self.version = iph[0] >> 4
         ihl = iph[0] & 0xF
         self.iph_len = ihl * 4
@@ -169,41 +195,68 @@ class Packet:
         self.src_addr = socket.inet_ntoa(iph[8])
         self.dest_addr = socket.inet_ntoa(iph[9])
 
+    def parse_body(self):
+        self.header = unpack(self.proto_u, self.raw_header)
+        if self.protocol == Packet.ICMP:
+            self.src_port = self.dest_port = 0
+            self.parse_icmp()
+        elif self.protocol in [Packet.TCP, Packet.UDP]:
+            self.src_port = self.header[0]
+            self.dest_port = self.header[1]
+            if self.protocol == Packet.TCP:
+                self.parse_tcp()
+            elif self.protocol == Packet.UDP:
+                self.parse_udp()
+        self.data = self.raw[self.len_h:]
+
+    @property
+    def proto_u(self):
+        if self.protocol == Packet.TCP:
+            return Packet.U_TCP
+        elif self.protocol == Packet.UDP:
+            return Packet.U_UDP
+        elif self.protocol == Packet.ICMP:
+            return Packet.U_ICMP
+
+    @property
+    def base_h(self):
+        return self.iph_len + self.eth_len
+
+    @property
+    def len_h(self):
+        if self.protocol == Packet.TCP:
+            return self.base_h + (self.tcph_len * 4)
+        elif self.protocol == Packet.UDP:
+            return self.base_h + self.udph_len
+        elif self.protocol == Packet.ICMP:
+            return self.base_h + self.icmph_len
+        return 0
+
+    @property
+    def raw_header(self):
+        h = self.base_h
+        if self.protocol == Packet.TCP:
+            offset = 20
+        elif self.protocol == Packet.UDP:
+            offset = 8
+        elif self.protocol == Packet.ICMP:
+            offset = 4
+        return self.raw[h:h+offset]
+
     def parse_tcp(self):
-        t = self.iph_len + self.eth_len
-        tcp_head = self.raw[t:t+20]
-        tcph = unpack('!HHLLBBHHH', tcp_head)
-        self.source_port = tcph[0]
-        self.dest_port = tcph[1]
-        self.seq = tcph[2]
-        self.ack = tcph[3]
-        self.doff_res = tcph[4]
+        self.seq = self.header[2]
+        self.ack = self.header[3]
+        self.doff_res = self.header[4]
         self.tcph_len = self.doff_res >> 4
-        h_size = self.eth_len + self.iph_len + (self.tcph_len * 4)
-        self.data = self.raw[h_size:]
 
     def parse_udp(self):
-        u = self.iph_len + self.eth_len
-        udp_head = self.raw[u:u+8]
-        udph = unpack('!HHHH', udp_head)
-        self.source_port = udph[0]
-        self.dest_port = udph[1]
-        self.length = udph[2]
-        self.checksum = udph[3]
-        h_size = self.eth_len + self.iph_len + self.udph_len
-        self.data = self.raw[h_size:]
+        self.length = self.header[2]
+        self.checksum = self.header[3]
 
     def parse_icmp(self):
-        i = self.eth_len + self.iph_len
-        icmp_head = self.raw[i:i+4]
-        self.icmph = unpack('!BBH', icmp_head)
-        self.src_port = None
-        self.dest_port = None
-        self.icmp_type = self.icmph[0]
-        self.icmp_code = self.icmph[1]
-        self.checksum = self.icmph[2]
-        h_size = self.eth_len + self.iph_len + self.icmph_len
-        self.data = self.raw[h_size:]
+        self.icmp_type = self.header[0]
+        self.icmp_code = self.header[1]
+        self.checksum = self.header[2]
 
     @property
     def ip_packet(self):
@@ -239,30 +292,34 @@ class Sniffer:
 
     def run(self):
         self.listen()
-        cprint('[*] Packets parsed:   {}'.format(self.parsed), Color.MSG)
-        cprint('[*] Packets filtered: {}'.format(self.filtered), Color.MSG)
-        cprint('[*] Run time:         {}s'.format(time.time() - self.start), Color.MSG)
+        cprint(' -  Packets parsed:   {}'.format(self.parsed), Color.GREEN, True)
+        cprint(' -  Packets filtered: {}'.format(self.filtered), Color.GREEN, True)
+        cprint(' -  Run time:         {}s'.format(time.time() - self.start), Color.GREEN, True)
+
+    def _filter(self, p):
+        if any([
+                p.protocol not in self.filter_list,
+                self.args.src_port and str(p.src_port) not in self.args.src_port,
+                self.args.dest_port and str(p.dest_port) not in self.args.dest_port,
+                self.args.src_ip and p.src_addr not in self.args.src_ip,
+                self.args.dest_ip and p.dest_ip not in self.args.dest_ip
+                ]):
+            return False
+        return True
 
     def listen(self):
+        cprint('[!] Listening for packets', Color.MSG)
         with InterruptHandler() as h:
             while True:
                 if h.interrupted:
-                    cprint('\n[!] Keyboard Interrupt Detected', Color.ERR)
+                    print('\n')
+                    cprint('[!] Keyboard Interrupt Detected', Color.ERR)
                     return
                 try:
                     packet = Packet(self.sock.recvfrom(65565)[0])
-                    if packet.protocol in self.filter_list:
+                    if self._filter(packet):
                         self.parsed += 1
-                        if self.args.src_port is not None:
-                            if packet.source_port != self.args.src_port:
-                                self.filtered += 1
-                                continue
-                        if self.args.dest_port is not None:
-                            if packet.dest_port != self.args.dest_port:
-                                self.filtered += 1
-                                continue
-                        else:
-                            packet.info()
+                        packet.info()
                     else:
                         self.filtered += 1
                 except InterruptedError:
@@ -270,5 +327,9 @@ class Sniffer:
 
 if __name__ == "__main__":
     this.args = cli()
+    cprint('[*] PokeySniff v{} ({})'.format(VERSION, RELEASE), Color.MSG)
+    cprint(' -  Command line arguments parsed', Color.GREEN)
     app = Sniffer(args)
+    cprint(' -  Port sniffer spawned', Color.GREEN, True)
     app.run()
+    cprint('[!] Completed', Color.MSG)
