@@ -328,7 +328,7 @@ class Sniffer:
 if __name__ == "__main__":
     this.args = cli()
     cprint('[*] PokeySniff v{} ({})'.format(VERSION, RELEASE), Color.MSG)
-    cprint(' -  Command line arguments parsed', Color.GREEN)
+    cprint(' -  Command line arguments parsed', Color.GREEN, True)
     app = Sniffer(args)
     cprint(' -  Port sniffer spawned', Color.GREEN, True)
     app.run()
