@@ -35,7 +35,3 @@ Each filter allows for multiple arguments
 ```
 python pokeysniff.py --dest-port 25 26 587 --dest-ip 8.8.4.4 129.33.214.82 --filter tcp udp
 ```
-## To-Do:
-* Implement ip-based filtering
-* Improve port filtering
-* Correct buffer delay
