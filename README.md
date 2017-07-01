@@ -5,34 +5,34 @@ This utility was designed as a bare-bones Python 3 packet sniffer for circumstan
 Usage follows these basic guidelines:
 
 ```
-usage: pokeysniff.py [-h] [--filter [{tcp,udp,icmp}]] [--src_port SRC_PORT]
-          [--dest_port DEST_PORT] [--nocolor]
+usage: pokeysniff.py [-h] [--filter [{tcp,udp,icmp} [{tcp,udp,icmp} ...]]]
+                     [--src-port [SRC_PORT [SRC_PORT ...]]]
+                     [--src-ip [SRC_IP [SRC_IP ...]]]
+                     [--dest-port [DEST_PORT [DEST_PORT ...]]]
+                     [--dest-ip [DEST_IP [DEST_IP ...]]] [--nocolor]
+                     [--verbose] [--no-data]
 
 optional arguments:
   -h, --help            show this help message and exit
-  --filter [{tcp,udp,icmp}]
+  --filter [{tcp,udp,icmp} [{tcp,udp,icmp} ...]]
                         filter packets by type
-  --src_port SRC_PORT   specify a source port to monitor
-  --dest_port DEST_PORT
-                        specify a destination port to monitor
+  --src-port [SRC_PORT [SRC_PORT ...]]
+                        filter packets by source port
+  --src-ip [SRC_IP [SRC_IP ...]]
+                        filter packets by source IP
+  --dest-port [DEST_PORT [DEST_PORT ...]]
+                        filter packets by destination port
+  --dest-ip [DEST_IP [DEST_IP ...]]
+                        filter packets by destination IP
   --nocolor             Skip colors in output
+  --verbose             Enable verbose output
+  --no-data             Skip printing raw data
 ```
 
 The script can be obtained directly from my script repository
 
 ```
-# python3 <(curl -s https://scripts.pokeybill.us/pokeysniff.py) --help
-usage: 63 [-h] [--filter [{tcp,udp,icmp}]] [--src_port SRC_PORT]
-          [--dest_port DEST_PORT] [--nocolor]
-
-optional arguments:
-  -h, --help            show this help message and exit
-  --filter [{tcp,udp,icmp}]
-                        filter packets by type
-  --src_port SRC_PORT   specify a source port to monitor
-  --dest_port DEST_PORT
-                        specify a destination port to monitor
-  --nocolor             Skip colors in output
+wget https://scripts.pokeybill.us/pokeysniff.py
 ```
 
 ## To-Do:
